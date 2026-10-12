@@ -22,17 +22,14 @@ scripts/requirements.txt  thư viện Python cần cài
 git clone https://github.com/goccontent/lam-khuon-cat-3d ~/.claude/skills/lam-khuon-cat-3d
 ```
 
-**claude.ai**
+**claude.ai và Claude API**
 
-1. Tải `lam-khuon-cat-3d.zip` ở mục Releases.
-2. Vào Settings > Features để tải lên.
+1. Tải file zip: [main.zip](https://github.com/goccontent/lam-khuon-cat-3d/archive/refs/heads/main.zip). Cũng có thể bấm **Code > Download ZIP**.
+2. Tải lên claude.ai ở Settings > Features, hoặc tải lên qua Skills API (`/v1/skills`).
 
-**Claude API**
+Nếu bước tải lên báo lỗi tên thư mục, giải nén ra, đổi tên thư mục `lam-khuon-cat-3d-main` thành `lam-khuon-cat-3d`, rồi nén lại.
 
-1. Tải file zip ở mục Releases.
-2. Tải lên qua Skills API (`/v1/skills`).
-
-Lưu ý: môi trường chạy skill trên API không có mạng, nên cần có sẵn `trimesh` và `manifold3d`.
+Lưu ý với API: môi trường chạy skill trên API không có mạng, nên cần có sẵn `trimesh` và `manifold3d`.
 
 **Agent khác**
 
