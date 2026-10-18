@@ -11,6 +11,8 @@ Trả lời bằng tiếng Việt, xưng "mình". Người dùng đọc trên đ
 
 Toàn bộ quy trình đã kiểm chứng nằm trong `scripts/khuon3d.py` (cùng thư mục với file này). **Không viết lại thuật toán**: các tham số trong script đã được người dùng duyệt qua nhiều vòng sửa. Nếu phải sửa script cho một bộ khuôn, sửa trong bản sao ở thư mục làm việc, rồi báo lại để đưa vào skill.
 
+**BẮT BUỘC đọc `LICH_SU.md` trước khi làm**: file đó ghi lịch sử hình thành quy trình, gồm từng lần làm sai hoặc thất bại và bài học cứng rút ra. Phần lớn lỗi một agent mới có thể mắc đã xảy ra ở đó. Khi sửa skill này, ghi thêm một đợt vào cuối `LICH_SU.md`.
+
 Agent chạy skill này cần: chạy được Python 3 và cài thư viện, **xem được ảnh** (để soát viền), và có cách giao file/hỏi người dùng (xem mục 6).
 
 ---

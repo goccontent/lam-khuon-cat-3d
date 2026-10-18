@@ -10,6 +10,7 @@ Skill tách đường viền (giữ khe xẻ thuỳ, mũi răng, nét cuống) v
 
 ```
 SKILL.md                  hướng dẫn cho agent (bắt buộc đọc trước)
+LICH_SU.md                lịch sử hình thành: các lần sai/thất bại và bài học cứng (bắt buộc đọc)
 scripts/khuon3d.py        script đã kiểm chứng: grid → extract → soi → build
 scripts/requirements.txt  thư viện Python cần cài
 ```
