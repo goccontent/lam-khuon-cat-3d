@@ -4,8 +4,10 @@
 Lệnh:
   python3 khuon3d.py grid   ANH.jpg OUT_DIR          # ảnh lưới toạ độ pixel để chọn khung crop
   python3 khuon3d.py extract config.json             # tách viền -> raw.json + kiem_tra_vien.jpg + bao cáo px/mm
+  python3 khuon3d.py soi     config.json             # OUT/soi/<id>.jpg: phóng to từng hình + viền đỏ để soát kỹ
   python3 khuon3d.py build   config.json             # dựng STL + ảnh 3D + ảnh đối chiếu 2D + zip
-  (python3 khuon3d.py all config.json = extract + build)
+  (python3 khuon3d.py all config.json = extract + soi + build)
+  Windows: gõ `python` thay cho `python3`.
 
 config.json (toạ độ khung = pixel của ẢNH GỐC, không phải ảnh thu nhỏ):
 {
@@ -19,22 +21,35 @@ config.json (toạ độ khung = pixel của ẢNH GỐC, không phải ảnh th
      "kind": "petal", "contour": "hole", "hole_rank": 1},
     {"id": "6_la_xe", "name": "Lá xẻ thuỳ", "box": [...], "W": 34, "H": 63, "kind": "leaf", "thresh": 16}
   ],
-  "cutter": {"blade_h": 12, "wall": 1.5, "edge": 1.0, "bevel_h": 3, "base_w": 4, "base_t": 2.5}
+  "cutter": {"blade_h": 12, "wall": 1.5, "edge": 0.5, "bevel_h": 3, "base_w": 4, "base_t": 2.5},
+  "loc_chu_xanh": true
 }
 W = chiều ngang, H = chiều dọc của HÌNH (đường viền), đúng như người dùng ghi "W x H".
+contour: "trong" (mặc định, giữ khe xẻ thuỳ + mũi răng) | "outer" (cách cũ, mép ngoài + close 13) | "hole" (viền trong hình lồng).
 """
 import sys, os, json, glob, zipfile, pickle
 import numpy as np
 
-CUT_DEFAULT = dict(blade_h=12.0, wall=1.5, edge=1.0, bevel_h=3.0, base_w=4.0, base_t=2.5)
-FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+CUT_DEFAULT = dict(blade_h=12.0, wall=1.5, edge=0.5, bevel_h=3.0, base_w=4.0, base_t=2.5)
+FONT = next((f for f in ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'C:/Windows/Fonts/arial.ttf',
+                          '/System/Library/Fonts/Supplemental/Arial.ttf', '/Library/Fonts/Arial.ttf')
+             if os.path.exists(f)), 'DejaVuSans.ttf')
+
+
+def contour_mode(s):
+    return s.get('contour', 'trong')
+
+
+def imread(path):
+    import cv2                                  # đọc được cả đường dẫn có dấu tiếng Việt trên Windows
+    return cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)
 
 
 # ---------------------------------------------------------------- grid
 def cmd_grid(img, out):
     import cv2
     os.makedirs(out, exist_ok=True)
-    im = cv2.imread(img)
+    im = imread(img)
     h, w = im.shape[:2]
     s = 1200 / max(h, w)
     v = cv2.resize(im, None, fx=s, fy=s)
@@ -54,10 +69,11 @@ def cmd_grid(img, out):
 def cmd_extract(cfg):
     import cv2
     out = cfg['out']; os.makedirs(out, exist_ok=True)
-    im = cv2.imread(cfg['image'])
+    im = imread(cfg['image'])
     g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(np.float32)
     b, gg, r = [im[..., i].astype(int) for i in range(3)]
     ink_blue = (b - r > 25)                     # chữ ghi số đo bằng bút bi xanh -> bỏ
+    if not cfg.get('loc_chu_xanh', True): ink_blue[:] = False   # nét viền có lẫn mực xanh -> giữ
     small = cv2.resize(g, None, fx=0.1, fy=0.1)
     bg = cv2.resize(cv2.medianBlur(small.astype(np.uint8), 31), (g.shape[1], g.shape[0])).astype(np.float32)
     d = bg - g; d[ink_blue] = 0                 # nền phẳng: nét đậm -> d lớn
@@ -70,10 +86,38 @@ def cmd_extract(cfg):
         n, lab, st, _ = cv2.connectedComponentsWithStats(m)
         for i in range(1, n):
             if st[i, 4] < 150: m[lab == i] = 0
-        k = s.get('close', 13)
+        k = s.get('close', 1 if contour_mode(s) == 'trong' else 13)   # 'trong' tự nối nét đứt, không cần close
         m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
         cs, h = cv2.findContours(m, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
-        if s.get('contour', 'outer') == 'hole':
+        if contour_mode(s) == 'trong':
+            # lòng trong của nét: nối chỗ đứt <= 2r px, tô loang từ ngoài; khe xẻ thuỳ nằm ngoài nên không bị lấp
+            rr = s.get('bridge', 4)
+            ke = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * rr + 1, 2 * rr + 1))
+            md = cv2.dilate(m, ke)
+            ff = np.pad(1 - md, 1, constant_values=1).astype(np.uint8)
+            cv2.floodFill(ff, None, (0, 0), 2)
+            inn = (ff[1:-1, 1:-1] == 1).astype(np.uint8)
+            n2, lab2, st2, _ = cv2.connectedComponentsWithStats(inn)
+            inn = (lab2 == 1 + np.argmax(st2[1:, 4])).astype(np.uint8)
+            inn = cv2.dilate(inn, ke)
+            # cộng lại các cụm nét ôm quanh lòng -> lấy MÉP NGOÀI nét (giữ mũi răng nhọn), khe vẫn hở
+            n3, lab3 = cv2.connectedComponents(m)
+            near = cv2.dilate(inn, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
+            keep = np.isin(lab3, np.unique(lab3[near & (m > 0)]))
+            reg = ((inn > 0) | keep).astype(np.uint8)
+            reg = cv2.morphologyEx(reg, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+            cs, _ = cv2.findContours(reg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            reg = np.zeros_like(reg); cv2.drawContours(reg, cs, -1, 1, -1)
+            # cả hai về TÂM NÉT: A = mép ngoài co vào (mũi nhọn đúng, khe chập bị lấp); B = lòng trong nở ra (khe đúng, mũi cụt)
+            hk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            A = cv2.erode(reg, hk); B = cv2.dilate(inn, hk)
+            ck = s.get('slit_k', 21)
+            Bc = cv2.morphologyEx(B, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ck, ck)))
+            reg = ((B > 0) | ((A > 0) & (Bc == 0))).astype(np.uint8)   # chỉ bù phần lồi (mũi), bỏ phần lõm (khe)
+            reg = cv2.morphologyEx(reg, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+            cs, h = cv2.findContours(reg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            j = max(range(len(cs)), key=lambda j: cv2.contourArea(cs[j]))
+        elif contour_mode(s) == 'hole':
             holes = sorted([j for j in range(len(cs)) if h[0][j][3] != -1], key=lambda j: -cv2.contourArea(cs[j]))
             j = holes[s.get('hole_rank', 1)]
         else:
@@ -103,6 +147,22 @@ def cmd_extract(cfg):
     json.dump(rep, open(os.path.join(out, 'bao_cao_ty_le.json'), 'w'), ensure_ascii=False, indent=1)
 
 
+# ---------------------------------------------------------------- soi
+def cmd_soi(cfg):
+    """Phóng to từng hình (cạnh dài 1100 px) và vẽ viền đỏ đã tách, để soát kỹ khe, mũi răng, cuống."""
+    import cv2
+    out = cfg['out']; os.makedirs(os.path.join(out, 'soi'), exist_ok=True)
+    raw = json.load(open(os.path.join(out, 'raw.json')))
+    im = imread(cfg['image'])
+    for s in cfg['shapes']:
+        x0, y0, x1, y1 = s['box']; c = im[y0:y1, x0:x1].copy()
+        sc = 1100 / max(c.shape[:2]); c = cv2.resize(c, None, fx=sc, fy=sc, interpolation=cv2.INTER_CUBIC)
+        cc = (np.array(raw[s['id']]) - [x0, y0]) * sc
+        cv2.polylines(c, [cc.astype(np.int32)], True, (0, 0, 255), 2)
+        cv2.imwrite(os.path.join(out, 'soi', s['id'] + '.jpg'), c)
+    print('Ảnh soát ->', os.path.join(out, 'soi'))
+
+
 # ---------------------------------------------------------------- shape
 def make_shape(s, rawc):
     from shapely.geometry import Polygon, MultiPolygon
@@ -113,7 +173,7 @@ def make_shape(s, rawc):
     half = s.get('stroke_half_px', 2.5)
     p = Polygon(rawc).buffer(0)
     # contour ngoài = mép ngoài nét bút -> co vào tâm nét; contour lỗ = mép trong -> nở ra
-    p = p.buffer(half if s.get('contour', 'outer') == 'hole' else -half)
+    p = p.buffer(0 if contour_mode(s) == 'trong' else half if contour_mode(s) == 'hole' else -half)   # 'trong' đã về tâm nét
     p = big(p.buffer(1.0).buffer(-2.0).buffer(1.0))          # khử nhiễu NHẸ (không dùng 2.5/-5 vì bào mất cuống)
     p = affinity.scale(p, 1, -1, origin=(0, 0))               # ảnh y-xuống -> CAD y-lên
     x0, y0, x1, y1 = p.bounds
@@ -141,7 +201,9 @@ def make_shape(s, rawc):
 
 def make_cutter(sp, cut):
     import trimesh
+    import shapely
     wall, edge, H, bh = cut['wall'], cut['edge'], cut['blade_h'], cut['bevel_h']
+    sp = shapely.set_precision(sp.simplify(0.005), 0.001)      # bỏ đỉnh sát nhau -> STL float32 không gộp đỉnh hỏng kín khối
     parts = [trimesh.creation.extrude_polygon(sp.buffer(wall + cut['base_w'], quad_segs=32).difference(sp), cut['base_t']),
              trimesh.creation.extrude_polygon(sp.buffer(wall, quad_segs=16).difference(sp), H - bh)]
     N = 12                                                     # 12 lát vát: 0,25 mm/lát, mỏng dần wall -> edge
@@ -273,6 +335,8 @@ def cmd_build(cfg):
         b = q.bounds
         print(f"{s['id']:16s} lòng khuôn {b[2]-b[0]:.2f} x {b[3]-b[1]:.2f} mm | khuôn {M.extents[0]:.1f} x {M.extents[1]:.1f} x {M.extents[2]:.1f} | kín khối={M.is_watertight} | cuống x={cx:.1f}")
         if not M.is_watertight: print('  !!! KHÔNG KÍN KHỐI — kiểm tra lại đường viền')
+        import trimesh
+        if not trimesh.load(stl).is_watertight: print('  !!! STL NẠP LẠI KHÔNG KÍN KHỐI')
         jobs.append((stl, os.path.join(out, f"xem_{s['id']}.png"), f"{s['name']} — {s['W']:g} × {s['H']:g} mm", footer, s['kind']))
     pickle.dump(shapes, open(os.path.join(out, 'shapes.pkl'), 'wb'))
     with Pool(min(len(jobs), os.cpu_count() or 2)) as pool:
@@ -296,6 +360,7 @@ if __name__ == '__main__':
     cmd = sys.argv[1]
     if cmd == 'grid': cmd_grid(sys.argv[2], sys.argv[3])
     else:
-        cfg = json.load(open(sys.argv[2]))
+        cfg = json.load(open(sys.argv[2], encoding='utf-8'))
         if cmd in ('extract', 'all'): cmd_extract(cfg)
+        if cmd in ('soi', 'all'): cmd_soi(cfg)
         if cmd in ('build', 'all'): cmd_build(cfg)

@@ -6,4 +6,4 @@ manifold3d
 mapbox_earcut
 opencv-python-headless
 pillow
-# Ngoài Python còn cần: poppler-utils (lệnh pdfimages) và font DejaVuSans
+# Ngoài Python: poppler-utils (lệnh pdfimages) hoặc pymupdf để đọc PDF
