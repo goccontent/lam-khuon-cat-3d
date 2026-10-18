@@ -46,6 +46,7 @@ Agent chạy skill này cần: chạy được Python 3 và cài thư viện, **
 | Thân thành | 1,5 mm | `wall` |
 | Mép lưỡi cắt | **0,5 mm**, vát dần trong 3 mm trên cùng (12 lát, mỗi lát 0,25 mm) | `edge`, `bevel_h` |
 | Đế viền | rộng 4 mm tính từ mặt ngoài thân, dày 2,5 mm | `base_w`, `base_t` |
+| Thân trong khe hẹp | 0,8 mm, chỉ ở khe hẹp hơn 2 × thân (mục 4.9) | `wall_khe` |
 | Mặt trong lưỡi | thẳng đứng, trùng đường viền hình | (cố định) |
 
 - Mép cắt 0,5 mm là yêu cầu của người dùng từ tháng 10/2026 (bộ Poppy cũ dùng 1,0 mm).
@@ -131,10 +132,11 @@ Config mẫu đã duyệt nằm ở **Phụ lục**.
    - Đề nghị phương án giữ đúng dáng vẽ: chỉ khớp một chiều, chiều kia theo tỷ lệ bản vẽ.
 7. **Kín khối sau khi nạp lại STL.** Lúc dựng báo kín chưa đủ: STL lưu toạ độ float32, các đỉnh quá sát nhau ở đáy đế bị gộp và làm hở khối (đã gặp ở 4/7 khuôn chân ngỗng). Script đã làm sạch viền (`simplify 0.005` + `set_precision 0.001`, lệch ≤ 0,003 mm) và **nạp lại từng STL để kiểm**. Thấy dòng `!!! STL NẠP LẠI KHÔNG KÍN KHỐI` hoặc `kín khối=False` thì chưa được gửi; kiểm tra lại contour (thường do box cắt ngang hình hoặc ngưỡng quá thấp).
 8. **Cuống quá hẹp.** Nếu lòng cuống hẹp dưới khoảng 2 mm (ví dụ lá xẻ thuỳ Poppy chỉ 1 mm), giữ đúng nét vẽ nhưng **cảnh báo** người dùng rằng phôi đất sét dễ kẹt, và đề nghị nới ra khoảng 2 mm.
-9. **Khe hẹp hơn 2 × thân (3 mm) bị đặc phía ngoài.** Thân 1,5 mm của hai thuỳ dính nhau, nên nhìn khuôn thấy khe bị "lấp". Đường cắt bên trong vẫn đúng tới đáy khe. Khi gặp:
-   - báo người dùng **đoạn đặc dài bao nhiêu mm ở từng khe**, kèm ảnh phóng to khe (nét đường cắt + vùng thân);
-   - đưa phương án: thân mỏng 0,8 mm hoặc 1,0 mm **chỉ ở vùng khe** (đoạn đặc ngắn lại, lưỡi chỗ đó yếu hơn), hoặc giữ nguyên (phần đặc chỉ đẩy đất thừa);
-   - để người dùng chọn; chưa có phương án mặc định (bộ chân ngỗng 16/10: lá vừa khe trái đặc ~6,7 mm, khe phải ~2,6 mm — người dùng chưa chốt).
+9. **Khe hẹp hơn 2 × thân (3 mm) bị đặc phía ngoài.** Thân 1,5 mm của hai thuỳ dính nhau, nên nhìn khuôn thấy khe bị "lấp", dù đường cắt bên trong vẫn đúng tới đáy khe. Mặc định đã xử lý: `wall_khe` = 0,8 mm. Hàm `slit_zone` tìm các khe hẹp hơn 2 × `wall` phía ngoài hình (phép mở hình trên nền ngoài, bỏ vùng < 0,3 mm²); **chỉ trong vùng đó** thân mỏng còn 0,8 mm, ở chỗ khác vẫn 1,5 mm. Phần vát mép không đổi. Đế viền vẫn đặc (nằm dưới, cách mép cắt 9,5 mm).
+   - Người dùng chốt 0,8 mm ở bộ chân ngỗng (18/10/2026), áp cho cả lá vừa, lá lớn, lá nhỏ. Cánh hoa không có khe nên không đổi.
+   - Đoạn khe hẹp dưới 1,6 mm (sát đáy) vẫn đặc; đó là giới hạn của thân 0,8 mm.
+   - Muốn tắt: `"cutter": {"wall_khe": null}`. Muốn đổi độ dày: `"wall_khe": 1.0`.
+   - Khi giao bộ có lá xẻ thuỳ, kèm ảnh so sánh thân nhìn từ trên xuống (tím = thân, đỏ = đường cắt) để người dùng thấy khe đã mở.
 10. **Nét phụ trong lá** (gân lá, nét phác chì): script chỉ lấy viền ngoài lớn nhất nên tự bỏ qua. Không cần xử lý thêm.
 11. **Đừng tự ý đổi** thông số khuôn, màu render hay tên file khi người dùng chưa yêu cầu.
 12. **Người dùng đổi thông số khuôn** (thành, mép, chiều cao, đế): sửa `cutter` trong config rồi dựng lại **cả bộ**, để các khuôn luôn đồng bộ.

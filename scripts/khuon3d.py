@@ -21,16 +21,17 @@ config.json (toạ độ khung = pixel của ẢNH GỐC, không phải ảnh th
      "kind": "petal", "contour": "hole", "hole_rank": 1},
     {"id": "6_la_xe", "name": "Lá xẻ thuỳ", "box": [...], "W": 34, "H": 63, "kind": "leaf", "thresh": 16}
   ],
-  "cutter": {"blade_h": 12, "wall": 1.5, "edge": 0.5, "bevel_h": 3, "base_w": 4, "base_t": 2.5},
+  "cutter": {"blade_h": 12, "wall": 1.5, "edge": 0.5, "bevel_h": 3, "base_w": 4, "base_t": 2.5, "wall_khe": 0.8},
   "loc_chu_xanh": true
 }
 W = chiều ngang, H = chiều dọc của HÌNH (đường viền), đúng như người dùng ghi "W x H".
+wall_khe: thân mỏng riêng trong khe hẹp hơn 2×wall (khe xẻ thuỳ) để khe không bị thân lấp đặc; null = tắt.
 contour: "trong" (mặc định, giữ khe xẻ thuỳ + mũi răng) | "outer" (cách cũ, mép ngoài + close 13) | "hole" (viền trong hình lồng).
 """
 import sys, os, json, glob, zipfile, pickle
 import numpy as np
 
-CUT_DEFAULT = dict(blade_h=12.0, wall=1.5, edge=0.5, bevel_h=3.0, base_w=4.0, base_t=2.5)
+CUT_DEFAULT = dict(blade_h=12.0, wall=1.5, edge=0.5, bevel_h=3.0, base_w=4.0, base_t=2.5, wall_khe=0.8)
 FONT = next((f for f in ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'C:/Windows/Fonts/arial.ttf',
                           '/System/Library/Fonts/Supplemental/Arial.ttf', '/Library/Fonts/Arial.ttf')
              if os.path.exists(f)), 'DejaVuSans.ttf')
@@ -199,19 +200,42 @@ def make_shape(s, rawc):
     return q, cx
 
 
+def _polys(g):
+    return [p for p in getattr(g, 'geoms', [g]) if p.geom_type == 'Polygon' and p.area > 1e-4]
+
+
+def slit_zone(sp, wall, min_area=0.3):
+    """Vùng khe hẹp hơn 2×wall phía ngoài hình (khe xẻ thuỳ): phần nền ngoài mà đĩa bán kính wall không lọt vào."""
+    from shapely.geometry import box
+    x0, y0, x1, y1 = sp.bounds
+    out = box(x0 - 20, y0 - 20, x1 + 20, y1 + 20).difference(sp)
+    hep = out.difference(out.buffer(-wall, quad_segs=16).buffer(wall, quad_segs=16)).intersection(sp.buffer(wall))
+    keep = [p for p in _polys(hep) if p.area >= min_area]
+    if not keep: return None
+    from shapely.ops import unary_union
+    return unary_union(keep).buffer(0.01)
+
+
 def make_cutter(sp, cut):
     import trimesh
     import shapely
     wall, edge, H, bh = cut['wall'], cut['edge'], cut['blade_h'], cut['bevel_h']
     sp = shapely.set_precision(sp.simplify(0.005), 0.001)      # bỏ đỉnh sát nhau -> STL float32 không gộp đỉnh hỏng kín khối
-    parts = [trimesh.creation.extrude_polygon(sp.buffer(wall + cut['base_w'], quad_segs=32).difference(sp), cut['base_t']),
-             trimesh.creation.extrude_polygon(sp.buffer(wall, quad_segs=16).difference(sp), H - bh)]
+    khe = slit_zone(sp, wall) if cut.get('wall_khe') else None
+    def ring(wd):                                              # vành thân dày wd; trong khe hẹp chỉ dày wall_khe
+        o = sp.buffer(wd, quad_segs=16)
+        if khe is not None and wd > cut['wall_khe']:
+            o = o.difference(khe).union(sp.buffer(cut['wall_khe'], quad_segs=16))
+        return shapely.set_precision(o.difference(sp), 0.001)
+    parts = [trimesh.creation.extrude_polygon(sp.buffer(wall + cut['base_w'], quad_segs=32).difference(sp), cut['base_t'])]
+    parts += [trimesh.creation.extrude_polygon(g, H - bh) for g in _polys(ring(wall))]
     N = 12                                                     # 12 lát vát: 0,25 mm/lát, mỏng dần wall -> edge
     for j in range(N):
         z0 = H - bh + bh * j / N; z1 = H - bh + bh * (j + 1) / N + 0.002
         wd = wall - (wall - edge) * (j + 0.5) / N
-        m = trimesh.creation.extrude_polygon(sp.buffer(wd, quad_segs=16).difference(sp), z1 - z0)
-        m.apply_translation([0, 0, z0]); parts.append(m)
+        for g in _polys(ring(wd)):
+            m = trimesh.creation.extrude_polygon(g, z1 - z0)
+            m.apply_translation([0, 0, z0]); parts.append(m)
     M = trimesh.boolean.union(parts, engine='manifold')
     M.apply_translation(-M.bounds[0])
     if M.volume < 0: M.invert()
